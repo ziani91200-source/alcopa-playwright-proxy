@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: alcopa-playwright-proxy
+    env: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    autoDeploy: true
+    envVars:
+      PLAYWRIGHT_BROWSERS_PATH: "0"
