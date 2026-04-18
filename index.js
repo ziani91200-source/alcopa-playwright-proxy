@@ -1,5 +1,5 @@
 ﻿import express from "express";
-import { chromium } from "playwright";
+import { chromium } from "playwright-chromium";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
