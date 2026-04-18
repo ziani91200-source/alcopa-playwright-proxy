@@ -1,0 +1,12 @@
+﻿{
+  "name": "alcopa-playwright-proxy",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node Node.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "playwright": "^1.43.0"
+  }
+}
