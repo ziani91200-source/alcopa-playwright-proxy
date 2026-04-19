@@ -16,7 +16,8 @@ async function launchBrowser() {
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-gpu"
+      "--disable-gpu",
+      "--disable-blink-features=AutomationControlled"
     ]
   });
 }
@@ -25,11 +26,29 @@ async function launchBrowser() {
 async function scrapeAlcopa(pageNumber = 1) {
   const browser = await launchBrowser();
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+      locale: "fr-FR",
+      timezoneId: "Europe/Paris",
+      viewport: { width: 1280, height: 800 },
+      extraHTTPHeaders: {
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Referer": "https://www.google.fr/"
+      }
+    });
 
+    const page = await context.newPage();
+
+    // Masquer que c'est Playwright
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+
+    // Bloquer images/fonts pour accélérer (garder JS actif pour le rendu)
     await page.route("**/*", (route) => {
       const type = route.request().resourceType();
-      if (["image", "font", "media"].includes(type)) {
+      if (["font", "media"].includes(type)) {
         route.abort();
       } else {
         route.continue();
@@ -40,6 +59,16 @@ async function scrapeAlcopa(pageNumber = 1) {
     console.log(`[scrape] Fetching page ${pageNumber}: ${url}`);
 
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    // Attendre que le contenu se charge
+    await page.waitForTimeout(4000);
+
+    // Vérifier si CAPTCHA présent
+    const hasCaptcha = await page.$("[class*='captcha']");
+    if (hasCaptcha) {
+      console.error("[scrape] CAPTCHA détecté !");
+      throw new Error("CAPTCHA détecté — accès bloqué par AWS WAF");
+    }
 
     await page.waitForSelector(".vehicle-card", { timeout: 15000 }).catch(() => {
       console.warn("[scrape] .vehicle-card not found — vérifier les sélecteurs CSS");
@@ -83,19 +112,35 @@ app.get("/alcopa", async (req, res) => {
   }
 });
 
-// --- GET /debug — HTML brut pour identifier les vrais sélecteurs CSS ---
+// --- GET /debug — HTML brut pour vérifier le contenu reçu ---
 app.get("/debug", async (req, res) => {
   const browser = await launchBrowser();
   try {
-    const page = await browser.newPage();
-    const pageNum = parseInt(req.query.page || "1", 10);
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+      locale: "fr-FR",
+      timezoneId: "Europe/Paris",
+      viewport: { width: 1280, height: 800 },
+      extraHTTPHeaders: {
+        "Accept-Language": "fr-FR,fr;q=0.9",
+        "Referer": "https://www.google.fr/"
+      }
+    });
 
+    const page = await context.newPage();
+
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+
+    const pageNum = parseInt(req.query.page || "1", 10);
     await page.goto(`https://www.alcopa-auction.fr/vehicules?page=${pageNum}`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
 
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(4000);
+
     const html = await page.content();
     res.send(`<pre style="font-size:12px">${html.replace(/</g, "&lt;")}</pre>`);
 
