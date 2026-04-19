@@ -5,8 +5,8 @@ app.use(express.json());
 
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
 
-function scraperUrl(targetUrl, method = "GET") {
-  return `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
+function scraperUrl(targetUrl) {
+  return `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true&premium=true`;
 }
 
 // --- Parser HTML ---
