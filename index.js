@@ -8,48 +8,47 @@ const BASE_URL = "https://www.alcopa-auction.fr/recherche";
 
 function scraperUrl(targetUrl) {
   return `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
-  }
-// --- Parser HTML avec les vrais sélecteurs ---
+}
+
+// --- Parser HTML ---
 function parseVehicles(html) {
   const results = [];
-
-  // Chaque carte véhicule
   const cardRegex = /<div class="card h-100">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>\s*<\/div>/g;
   let match;
 
   while ((match = cardRegex.exec(html)) !== null) {
     const block = match[1];
 
-    // Lien + titre depuis card-title
+    // Lien + titre
     const linkMatch = block.match(/href="(\/voiture-occasion\/[^"]+)"\s+class="text-white[^"]*"[^>]*>[\s\S]*?<\/i>\s*([\s\S]*?)<\/a>/);
     const link = linkMatch ? "https://www.alcopa-auction.fr" + linkMatch[1] : null;
     const title = linkMatch ? linkMatch[2].trim() : null;
 
-    // Modèle (p.mb-2)
+    // Modèle détaillé
     const modelMatch = block.match(/<p class="mb-2">\s*([\s\S]*?)\s*<\/p>/);
-    const model = modelMatch ? modelMatch[1].replace(/<[^>]+>/g, "").trim() : null;
+    const model = modelMatch ? modelMatch[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim() : null;
 
-    // Énergie, année, km, boîte (p.mb-1)
+    // Énergie, année, km, boîte
     const detailMatch = block.match(/<p class="mb-1">([\s\S]*?)<\/p>/);
     let energy = null, year = null, km = null, gearbox = null;
     if (detailMatch) {
       const detail = detailMatch[1].replace(/<br\s*\/?>/gi, "|");
-      const parts = detail.split("|").map(p => p.replace(/<[^>]+>/g, "").trim()).filter(Boolean);
-      energy = parts[0] || null;
+      energy = detail.split("|")[0].replace(/<[^>]+>/g, "").trim() || null;
       const yearMatch = detail.match(/1ère mise\s*:\s*(\d{4})/);
       year = yearMatch ? yearMatch[1] : null;
       const kmMatch = detail.match(/([\d\s]+)\s*km/);
       km = kmMatch ? kmMatch[1].trim() + " km" : null;
-      const gearMatch = detail.match(/Boîte\s+([\w]+)/);
+      const gearMatch = detail.match(/Boîte\s+([\wé]+)/);
       gearbox = gearMatch ? gearMatch[1] : null;
     }
 
-    // Prix (Mise à prix)
-    const priceMatch = block.match(/Mise à prix\s*:[\s\S]*?<strong>([\s\S]*?)<\/strong>/);
-    const price = priceMatch ? priceMatch[1].replace(/<[^>]+>/g, "").trim() : null;
+    // Prix
+    const priceMatch = block.match(/Mise à prix\s*:[\s\S]*?<strong>\s*([\s\S]*?)\s*<\/strong>/);
+    const priceRaw = priceMatch ? priceMatch[1].replace(/<[^>]+>/g, "").trim() : null;
+    const price = priceRaw === "--" ? null : priceRaw;
 
     // Lieu
-    const lieuMatch = block.match(/fa-location-crosshairs[^>]*><\/i>\s*([\w\s]+)<\/strong>/);
+    const lieuMatch = block.match(/fa-location-crosshairs"><\/i>\s*([^<]+)<\/strong>/);
     const lieu = lieuMatch ? lieuMatch[1].trim() : null;
 
     // Numéro de lot
@@ -57,22 +56,25 @@ function parseVehicles(html) {
     const lot = lotMatch ? lotMatch[1] : null;
 
     // Date de vente
-    const dateMatch = block.match(/fa-calendar[^>]*><\/i>\s*([\d\/]+)/);
+    const dateMatch = block.match(/fa-calendar"><\/i>\s*([\d\/]+)/);
     const date = dateMatch ? dateMatch[1].trim() : null;
 
     // Image
     const imgMatch = block.match(/src="(https:\/\/photos\.static\.alcopa-auction\.net[^"]+)"/);
     const img = imgMatch ? imgMatch[1] : null;
 
+    // Garantie
+    const garantie = /fa-circle-check/.test(block) ? "Oui" : "Non";
+
     if (title) {
-      results.push({ title, model, energy, year, km, gearbox, price, lieu, lot, date, img, link });
+      results.push({ lot, title, model, energy, year, km, gearbox, price, lieu, date, img, garantie, link });
     }
   }
 
   return results;
 }
 
-// --- Scraper ---
+// --- Scraper multi-pages ---
 async function scrapeAlcopa(pageNumber = 1) {
   if (!SCRAPER_API_KEY) throw new Error("SCRAPER_API_KEY manquante");
 
@@ -83,24 +85,42 @@ async function scrapeAlcopa(pageNumber = 1) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
   const html = await response.text();
-  console.log(`[scrape] HTML reçu: ${html.length} chars`);
+  console.log(`[scrape] HTML: ${html.length} chars`);
 
   const data = parseVehicles(html);
   console.log(`[scrape] ${data.length} véhicules trouvés`);
   return data;
 }
 
-// --- GET /alcopa ---
+// --- GET /alcopa?page=1 ---
 app.get("/alcopa", async (req, res) => {
   try {
     const page = parseInt(req.query.page || "1", 10);
     if (isNaN(page) || page < 1) return res.status(400).json({ error: "Page invalide" });
-
     const result = await scrapeAlcopa(page);
     res.json({ page, count: result.length, items: result });
-
   } catch (err) {
     console.error("[/alcopa]", err);
+    res.status(500).json({ error: err.toString() });
+  }
+});
+
+// --- GET /alcopa/all?pages=5 — toutes les pages ---
+app.get("/alcopa/all", async (req, res) => {
+  try {
+    const totalPages = parseInt(req.query.pages || "3", 10);
+    const allItems = [];
+
+    for (let p = 1; p <= totalPages; p++) {
+      const result = await scrapeAlcopa(p);
+      allItems.push(...result);
+      if (result.length === 0) break;
+      await new Promise(r => setTimeout(r, 1000)); // pause 1s entre pages
+    }
+
+    res.json({ total: allItems.length, items: allItems });
+  } catch (err) {
+    console.error("[/alcopa/all]", err);
     res.status(500).json({ error: err.toString() });
   }
 });
