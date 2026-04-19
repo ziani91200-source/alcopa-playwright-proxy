@@ -4,9 +4,8 @@ const app = express();
 app.use(express.json());
 
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
-const BASE_URL = "https://www.alcopa-auction.fr/recherche";
 
-function scraperUrl(targetUrl) {
+function scraperUrl(targetUrl, method = "GET") {
   return `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
 }
 
@@ -43,20 +42,57 @@ function parseVehicles(html) {
   return results;
 }
 
-// --- Scraper ---
+// --- Scraper avec POST ---
 async function scrapeAlcopa(pageNumber = 1) {
   if (!SCRAPER_API_KEY) throw new Error("SCRAPER_API_KEY manquante");
 
-  const targetUrl = `${BASE_URL}?page=${pageNumber}`;
-  const url = scraperUrl(targetUrl);
+  // Essayer d'abord avec l'URL paginée directe
+  const urls = [
+    `https://www.alcopa-auction.fr/recherche?page=${pageNumber}`,
+    `https://www.alcopa-auction.fr/recherche/${pageNumber}`,
+    `https://www.alcopa-auction.fr/recherche`
+  ];
 
-  console.log(`[scrape] Fetching page ${pageNumber} via ScraperAPI`);
-  const response = await fetch(url);
+  let html = null;
+  let lastError = null;
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  for (const targetUrl of urls) {
+    try {
+      console.log(`[scrape] Trying: ${targetUrl}`);
 
-  const html = await response.text();
-  console.log(`[scrape] HTML reçu: ${html.length} chars`);
+      // Essai GET
+      let response = await fetch(scraperUrl(targetUrl), {
+        method: "GET",
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (response.status === 405) {
+        // Essai POST via ScraperAPI avec body
+        response = await fetch(
+          `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `page=${pageNumber}`
+          }
+        );
+      }
+
+      if (response.ok) {
+        html = await response.text();
+        console.log(`[scrape] OK — ${html.length} chars depuis ${targetUrl}`);
+        break;
+      } else {
+        lastError = `HTTP ${response.status} pour ${targetUrl}`;
+        console.warn(`[scrape] ${lastError}`);
+      }
+    } catch (err) {
+      lastError = err.message;
+      console.warn(`[scrape] Erreur: ${err.message}`);
+    }
+  }
+
+  if (!html) throw new Error(lastError || "Impossible de récupérer les données");
 
   const data = parseVehicles(html);
   console.log(`[scrape] ${data.length} véhicules trouvés`);
@@ -82,11 +118,26 @@ app.get("/alcopa", async (req, res) => {
 app.get("/debug", async (req, res) => {
   try {
     if (!SCRAPER_API_KEY) throw new Error("SCRAPER_API_KEY manquante");
+
     const pageNum = parseInt(req.query.page || "1", 10);
-    const url = scraperUrl(`${BASE_URL}?page=${pageNum}`);
-    const response = await fetch(url);
+    const targetUrl = `https://www.alcopa-auction.fr/recherche?page=${pageNum}`;
+
+    // Essai GET puis POST
+    let response = await fetch(scraperUrl(targetUrl));
+    if (response.status === 405) {
+      response = await fetch(
+        `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `page=${pageNum}`
+        }
+      );
+    }
+
     const html = await response.text();
-    res.send(`<pre style="font-size:11px">${html.replace(/</g, "&lt;")}</pre>`);
+    res.send(`<p>Status: ${response.status} | Taille: ${html.length} chars</p><pre style="font-size:11px">${html.replace(/</g, "&lt;")}</pre>`);
+
   } catch (err) {
     res.status(500).json({ error: err.toString() });
   }
