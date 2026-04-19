@@ -4,7 +4,7 @@ import { chromium } from "playwright-chromium";
 const app = express();
 app.use(express.json());
 
-// --- Launch helper (shared config) ---
+// --- Launch helper ---
 async function launchBrowser() {
   return await chromium.launch({
     headless: true,
@@ -24,7 +24,7 @@ async function scrapeAlcopa(pageNumber = 1) {
   try {
     const page = await browser.newPage();
 
-    // Block images/fonts to speed up loading
+    // Bloquer images/fonts pour accélérer le scraping
     await page.route("**/*", (route) => {
       const type = route.request().resourceType();
       if (["image", "font", "media"].includes(type)) {
@@ -39,9 +39,8 @@ async function scrapeAlcopa(pageNumber = 1) {
 
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    // Wait for vehicle cards to appear
     await page.waitForSelector(".vehicle-card", { timeout: 15000 }).catch(() => {
-      console.warn("[scrape] .vehicle-card not found — selectors may need updating");
+      console.warn("[scrape] .vehicle-card not found — vérifier les sélecteurs CSS");
     });
 
     const data = await page.evaluate(() => {
@@ -56,7 +55,7 @@ async function scrapeAlcopa(pageNumber = 1) {
       }));
     });
 
-    console.log(`[scrape] Found ${data.length} items on page ${pageNumber}`);
+    console.log(`[scrape] ${data.length} véhicules trouvés (page ${pageNumber})`);
     return data;
 
   } finally {
@@ -64,13 +63,13 @@ async function scrapeAlcopa(pageNumber = 1) {
   }
 }
 
-// --- /alcopa — Main endpoint ---
+// --- GET /alcopa — Endpoint principal ---
 app.get("/alcopa", async (req, res) => {
   try {
     const page = parseInt(req.query.page || "1", 10);
 
     if (isNaN(page) || page < 1) {
-      return res.status(400).json({ error: "Invalid page number" });
+      return res.status(400).json({ error: "Numéro de page invalide" });
     }
 
     const result = await scrapeAlcopa(page);
@@ -82,12 +81,12 @@ app.get("/alcopa", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("[/alcopa] Error:", err);
+    console.error("[/alcopa] Erreur:", err);
     res.status(500).json({ error: err.toString() });
   }
 });
 
-// --- /debug — Returns raw HTML to identify real CSS selectors ---
+// --- GET /debug — HTML brut pour identifier les vrais sélecteurs CSS ---
 app.get("/debug", async (req, res) => {
   const browser = await launchBrowser();
 
@@ -100,7 +99,6 @@ app.get("/debug", async (req, res) => {
       timeout: 30000
     });
 
-    // Short wait to let JS render content
     await page.waitForTimeout(3000);
 
     const html = await page.content();
@@ -113,13 +111,13 @@ app.get("/debug", async (req, res) => {
   }
 });
 
-// --- /health — Quick status check ---
+// --- GET /health — Vérification que le service tourne ---
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// --- Server ---
+// --- Démarrage serveur ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Playwright proxy running on port ${PORT}`);
+  console.log(`Playwright proxy démarré sur le port ${PORT}`);
 });
