@@ -7,9 +7,8 @@ const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
 const BASE_URL = "https://www.alcopa-auction.fr/recherche";
 
 function scraperUrl(targetUrl) {
-  return `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true&premium=true`;
-}
-
+  return `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=false`;
+  }
 // --- Parser HTML avec les vrais sélecteurs ---
 function parseVehicles(html) {
   const results = [];
