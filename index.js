@@ -6,7 +6,11 @@ app.use(express.json());
 
 // --- Launch helper ---
 async function launchBrowser() {
+  const executablePath = chromium.executablePath();
+  console.log("[browser] executablePath:", executablePath);
+
   return await chromium.launch({
+    executablePath,
     headless: true,
     args: [
       "--no-sandbox",
@@ -20,11 +24,9 @@ async function launchBrowser() {
 // --- Scraper Alcopa ---
 async function scrapeAlcopa(pageNumber = 1) {
   const browser = await launchBrowser();
-
   try {
     const page = await browser.newPage();
 
-    // Bloquer images/fonts pour accélérer le scraping
     await page.route("**/*", (route) => {
       const type = route.request().resourceType();
       if (["image", "font", "media"].includes(type)) {
@@ -73,12 +75,7 @@ app.get("/alcopa", async (req, res) => {
     }
 
     const result = await scrapeAlcopa(page);
-
-    res.json({
-      page,
-      count: result.length,
-      items: result
-    });
+    res.json({ page, count: result.length, items: result });
 
   } catch (err) {
     console.error("[/alcopa] Erreur:", err);
@@ -89,7 +86,6 @@ app.get("/alcopa", async (req, res) => {
 // --- GET /debug — HTML brut pour identifier les vrais sélecteurs CSS ---
 app.get("/debug", async (req, res) => {
   const browser = await launchBrowser();
-
   try {
     const page = await browser.newPage();
     const pageNum = parseInt(req.query.page || "1", 10);
@@ -100,7 +96,6 @@ app.get("/debug", async (req, res) => {
     });
 
     await page.waitForTimeout(3000);
-
     const html = await page.content();
     res.send(`<pre style="font-size:12px">${html.replace(/</g, "&lt;")}</pre>`);
 
@@ -111,7 +106,7 @@ app.get("/debug", async (req, res) => {
   }
 });
 
-// --- GET /health — Vérification que le service tourne ---
+// --- GET /health ---
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
